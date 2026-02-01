@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Team Time Zone Converter</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .sub { font-size: 13px; color: #444; margin: 0 0 16px; line-height: 1.4; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; max-width: 860px; }
+    label { display:block; font-size: 12px; color: #333; margin-bottom: 4px; }
+    select, input { width: 100%; padding: 10px; font-size: 13px; }
+    button { padding: 10px 12px; font-size: 13px; cursor: pointer; }
+    .row { display:flex; gap: 12px; align-items: end; max-width: 860px; margin-top: 12px; }
+    .card { max-width: 860px; margin-top: 16px; border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
+    .big { font-size: 18px; margin: 0 0 6px; }
+    .small { font-size: 12px; color: #555; margin: 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .warn { color: #8a3b12; }
+  </style>
+</head>
+<body>
+  <h1>Team Time Zone Converter</h1>
+  <p class="sub">
+    Pick your location (“From”), enter your date/time, then pick the other location (“To”).
+    It will convert automatically and handle DST (e.g., EST/EDT) based on the date.
+  </p>
+
+  <div class="grid">
+    <div>
+      <label for="fromLoc">From (your location)</label>
+      <select id="fromLoc"></select>
+    </div>
+
+    <div>
+      <label for="toLoc">To (target location)</label>
+      <select id="toLoc"></select>
+    </div>
+
+    <div>
+      <label for="date">Date</label>
+      <input id="date" type="date" />
+    </div>
+
+    <div>
+      <label for="time">Time</label>
+      <input id="time" type="time" step="60" />
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="swapBtn" title="Swap From/To">Swap</button>
+    <button id="nowBtn" title="Set date/time to now (in From location)">Use now</button>
+    <div style="flex:1"></div>
+  </div>
+
+  <div class="card" id="resultCard">
+    <p class="big" id="resultMain">—</p>
+    <p class="small" id="resultSub">—</p>
+    <p class="small warn" id="resultNote" style="display:none;"></p>
+  </div>
+
+<script>
+  // Locations you requested
+  const LOCATIONS = [
+    { label: "Canada — Toronto (Eastern Time)", tz: "America/Toronto" },
+    { label: "Canada — Nova Scotia (Halifax)", tz: "America/Halifax" },
+    { label: "Canada — British Columbia (Vancouver)", tz: "America/Vancouver" },
+    { label: "Brazil — São Paulo", tz: "America/Sao_Paulo" },
+    { label: "Kenya — Nairobi", tz: "Africa/Nairobi" },
+    { label: "Philippines — Manila", tz: "Asia/Manila" },
+  ];
+
+  const fromLoc = document.getElementById("fromLoc");
+  const toLoc = document.getElementById("toLoc");
+  const dateEl = document.getElementById("date");
+  const timeEl = document.getElementById("time");
+  const swapBtn = document.getElementById("swapBtn");
+  const nowBtn = document.getElementById("nowBtn");
+
+  const resultMain = document.getElementById("resultMain");
+  const resultSub = document.getElementById("resultSub");
+  const resultNote = document.getElementById("resultNote");
+
+  // Populate dropdowns
+  function initSelects() {
+    for (const loc of LOCATIONS) {
+      const opt1 = document.createElement("option");
+      opt1.value = loc.tz;
+      opt1.textContent = loc.label;
+      fromLoc.appendChild(opt1);
+
+      const opt2 = document.createElement("option");
+      opt2.value = loc.tz;
+      opt2.textContent = loc.label;
+      toLoc.appendChild(opt2);
+    }
+
+    // Default: From = Manila, To = Toronto (common for your team)
+    fromLoc.value = "Asia/Manila";
+    toLoc.value = "America/Toronto";
+  }
+
+  // Format date/time in a target timezone
+  function formatInTZ(dateObj, tz) {
+    // Example: Mon, Feb 2, 2026, 3:00 PM EST
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+    return fmt.format(dateObj);
+  }
+
+  // Get timezone abbreviation at a given moment (EST/EDT etc.)
+  function tzAbbrev(dateObj, tz) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    }).formatToParts(dateObj);
+    const tzName = parts.find(p => p.type === "timeZoneName")?.value;
+    return tzName || "";
+  }
+
+  // Build a UTC Date representing the user's entered date/time interpreted in "from" timezone.
+  // This avoids relying on browser local timezone.
+  function buildInstantFromInput(fromTZ, yyyy, mm, dd, HH, MM) {
+    // Start with a UTC guess
+    let d = new Date(Date.UTC(yyyy, mm - 1, dd, HH, MM, 0));
+
+    // Adjust until the clock in fromTZ matches the user input.
+    // Usually converges quickly.
+    for (let i = 0; i < 6; i++) {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: fromTZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).formatToParts(d);
+
+      const get = (type) => parts.find(p => p.type === type)?.value;
+      const curY = Number(get("year"));
+      const curM = Number(get("month"));
+      const curD = Number(get("day"));
+      const curH = Number(get("hour"));
+      const curMin = Number(get("minute"));
+
+      const target = Date.UTC(yyyy, mm - 1, dd, HH, MM, 0);
+      const current = Date.UTC(curY, curM - 1, curD, curH, curMin, 0);
+
+      const diffMs = target - current;
+      if (diffMs === 0) return d;
+
+      d = new Date(d.getTime() + diffMs);
+    }
+    return d;
+  }
+
+  function convert() {
+    resultNote.style.display = "none";
+    const fromTZ = fromLoc.value;
+    const toTZ = toLoc.value;
+
+    if (!dateEl.value || !timeEl.value) {
+      resultMain.textContent = "Select a date and time to convert.";
+      resultSub.textContent = "";
+      return;
+    }
+
+    const [yyyy, mm, dd] = dateEl.value.split("-").map(Number);
+    const [HH, MM] = timeEl.value.split(":").map(Number);
+
+    // Handle potential DST “missing hour” issues gracefully (rare but possible on transition day)
+    const instant = buildInstantFromInput(fromTZ, yyyy, mm, dd, HH, MM);
+
+    const fromText = formatInTZ(instant, fromTZ);
+    const toText = formatInTZ(instant, toTZ);
+
+    const fromAbbr = tzAbbrev(instant, fromTZ);
+    const toAbbr = tzAbbrev(instant, toTZ);
+
+    resultMain.textContent = `→ ${toText}`;
+    resultSub.innerHTML = `From: <span class="mono">${fromText}</span><br/>To: <span class="mono">${toText}</span>`;
+
+    // If user set "EST" in their mind, remind that ET can be EST or EDT depending on date
+    if (fromTZ === "America/Toronto" || toTZ === "America/Toronto") {
+      const note = `Note: Eastern Time switches between EST and EDT depending on the date. Right now, it shows ${fromAbbr || "ET"} / ${toAbbr || "ET"} automatically.`;
+      resultNote.textContent = note;
+      resultNote.style.display = "block";
+    }
+  }
+
+  function setNowInFromTZ() {
+    const fromTZ = fromLoc.value;
+    const now = new Date();
+
+    // Get "now" displayed in fromTZ, then set inputs to those parts
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: fromTZ,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false
+    }).formatToParts(now);
+
+    const get = (t) => parts.find(p => p.type === t)?.value;
+    const y = get("year");
+    const m = get("month");
+    const d = get("day");
+    const h = get("hour");
+    const min = get("minute");
+
+    dateEl.value = `${y}-${m}-${d}`;
+    timeEl.value = `${h}:${min}`;
+    convert();
+  }
+
+  swapBtn.addEventListener("click", () => {
+    const a = fromLoc.value;
+    fromLoc.value = toLoc.value;
+    toLoc.value = a;
+    convert();
+  });
+
+  nowBtn.addEventListener("click", setNowInFromTZ);
+
+  // Convert whenever inputs change
+  [fromLoc, toLoc, dateEl, timeEl].forEach(el => el.addEventListener("change", convert));
+  timeEl.addEventListener("input", convert);
+
+  // Init
+  initSelects();
+
+  // Default date/time: now (in From TZ) to reduce confusion
+  setNowInFromTZ();
+</script>
+</body>
+</html>
