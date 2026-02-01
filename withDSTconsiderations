@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Team Time Zone Timetable (ET reference)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .note { font-size: 13px; line-height: 1.4; margin: 8px 0 16px; }
+    .controls { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 10px; margin: 12px 0 16px; }
+    label { font-size: 12px; color: #333; display: block; margin-bottom: 4px; }
+    input, select { width: 100%; padding: 8px; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f6f6f6; position: sticky; top: 0; }
+    .footer { margin-top: 14px; font-size: 12px; color: #444; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Team Time Zone Timetable (Reference: Eastern Time)</h1>
+
+  <div class="note">
+    <div><span class="pill">Reference</span> Uses <b>Eastern Time (Toronto)</b>. The label will show <b>EST</b> or <b>EDT</b> automatically depending on the date (DST-aware).</div>
+    <div style="margin-top:6px;"><span class="pill">Tip</span> For Trello: write deadlines in <b>ET</b> and add 1–2 key conversions in the description (PH / Kenya).</div>
+  </div>
+
+  <div class="controls">
+    <div>
+      <label for="date">Date</label>
+      <input id="date" type="date" />
+    </div>
+    <div>
+      <label for="startHour">Start (ET hour)</label>
+      <input id="startHour" type="number" min="0" max="23" value="8" />
+    </div>
+    <div>
+      <label for="endHour">End (ET hour)</label>
+      <input id="endHour" type="number" min="0" max="23" value="18" />
+    </div>
+    <div>
+      <label for="step">Step</label>
+      <select id="step">
+        <option value="60" selected>60 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="15">15 minutes</option>
+      </select>
+    </div>
+    <div>
+      <label for="format">Time format</label>
+      <select id="format">
+        <option value="12" selected>12-hour</option>
+        <option value="24">24-hour</option>
+      </select>
+    </div>
+    <div style="align-self:end;">
+      <button id="generate" style="width:100%; padding:10px; font-size:13px;">Generate timetable</button>
+    </div>
+  </div>
+
+  <div id="meta" class="note"></div>
+  <div style="overflow:auto;">
+    <table id="table"></table>
+  </div>
+
+  <div class="footer">
+    Time zones used:
+    Toronto (<code>America/Toronto</code>), Halifax (<code>America/Halifax</code>), Vancouver (<code>America/Vancouver</code>),
+    São Paulo (<code>America/Sao_Paulo</code>), Nairobi (<code>Africa/Nairobi</code>), Manila (<code>Asia/Manila</code>).
+  </div>
+
+<script>
+  // Reference zone (Eastern Time)
+  const REF_TZ = "America/Toronto";
+
+  // Locations: Canada provinces + Brazil + Kenya + Philippines
+  const LOCATIONS = [
+    { label: "Canada — Toronto (ET)", tz: "America/Toronto" },
+    { label: "Canada — Nova Scotia (Halifax / AT)", tz: "America/Halifax" },
+    { label: "Canada — British Columbia (Vancouver / PT)", tz: "America/Vancouver" },
+    { label: "Brazil — São Paulo", tz: "America/Sao_Paulo" },
+    { label: "Kenya — Nairobi", tz: "Africa/Nairobi" },
+    { label: "Philippines — Manila", tz: "Asia/Manila" },
+  ];
+
+  // Helper: format a Date into a given time zone with optional abbreviation
+  function fmt(date, timeZone, hour12) {
+    const f = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12,
+      timeZoneName: "short",
+    });
+    return f.format(date);
+  }
+
+  // Create a Date that represents "YYYY-MM-DD HH:MM" in REF_TZ.
+  // JS Date is UTC-based, so we build using UTC then shift by comparing displayed parts.
+  function makeRefZonedDate(yyyy, mm, dd, hour, minute) {
+    // Start with a UTC date, then adjust until its REF_TZ clock matches requested time.
+    let d = new Date(Date.UTC(yyyy, mm - 1, dd, hour, minute, 0));
+
+    // Iterate small adjustments (max 6 tries) to match the reference zone clock.
+    for (let i = 0; i < 6; i++) {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: REF_TZ,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hour12: false
+      }).formatToParts(d);
+
+      const get = (type) => parts.find(p => p.type === type)?.value;
+      const curY = Number(get("year"));
+      const curM = Number(get("month"));
+      const curD = Number(get("day"));
+      const curH = Number(get("hour"));
+      const curMin = Number(get("minute"));
+
+      const target = Date.UTC(yyyy, mm - 1, dd, hour, minute, 0);
+      const current = Date.UTC(curY, curM - 1, curD, curH, curMin, 0);
+
+      const diffMs = target - current;
+      if (diffMs === 0) return d;
+
+      d = new Date(d.getTime() + diffMs);
+    }
+    return d;
+  }
+
+  function buildTable() {
+    const dateStr = document.getElementById("date").value;
+    const startHour = Number(document.getElementById("startHour").value);
+    const endHour = Number(document.getElementById("endHour").value);
+    const stepMin = Number(document.getElementById("step").value);
+    const hour12 = document.getElementById("format").value === "12";
+
+    if (!dateStr) return;
+
+    const [yyyy, mm, dd] = dateStr.split("-").map(Number);
+
+    // Header
+    const table = document.getElementById("table");
+    table.innerHTML = "";
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+
+    const th0 = document.createElement("th");
+    th0.textContent = "Reference (Eastern Time)";
+    hr.appendChild(th0);
+
+    for (const loc of LOCATIONS) {
+      const th = document.createElement("th");
+      th.textContent = loc.label;
+      hr.appendChild(th);
+    }
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    // Build rows in REF_TZ
+    let current = makeRefZonedDate(yyyy, mm, dd, startHour, 0);
+    const end = makeRefZonedDate(yyyy, mm, dd, endHour, 0);
+
+    // Meta line: show whether ref is EST or EDT for this date/time
+    const refLabel = fmt(current, REF_TZ, hour12);
+    document.getElementById("meta").innerHTML =
+      `This timetable uses <b>Eastern Time</b> as the reference. On this date, Eastern Time displays as: <b>${refLabel}</b>.`;
+
+    while (current.getTime() <= end.getTime()) {
+      const tr = document.createElement("tr");
+
+      // Reference column
+      const tdRef = document.createElement("td");
+      tdRef.textContent = fmt(current, REF_TZ, hour12);
+      tr.appendChild(tdRef);
+
+      // Each location
+      for (const loc of LOCATIONS) {
+        const td = document.createElement("td");
+        td.textContent = fmt(current, loc.tz, hour12);
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+      current = new Date(current.getTime() + stepMin * 60 * 1000);
+    }
+
+    table.appendChild(tbody);
+  }
+
+  // Default date: today in local browser; okay for internal use
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const dd = String(today.getDate()).padStart(2, "0");
+  document.getElementById("date").value = `${yyyy}-${mm}-${dd}`;
+
+  document.getElementById("generate").addEventListener("click", buildTable);
+  buildTable();
+</script>
+</body>
+</html>
