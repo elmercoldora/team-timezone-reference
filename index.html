@@ -6,133 +6,42 @@
   <title>Team Time Zone Converter</title>
 
   <style>
-    body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      margin: 20px;
-      background: #fff;
-      color: #111;
-    }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; background: #fff; color: #111; }
+    h1 { font-size: 18px; margin-bottom: 8px; }
+    .sub { font-size: 13px; color: #444; margin-bottom: 16px; max-width: 860px; line-height: 1.4; }
 
-    h1 {
-      font-size: 18px;
-      margin-bottom: 8px;
-    }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 12px; max-width: 860px; }
+    label { display: block; font-size: 12px; margin-bottom: 4px; color: #333; }
+    select, input { width: 100%; padding: 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 6px; }
 
-    .sub {
-      font-size: 13px;
-      color: #444;
-      margin-bottom: 16px;
-      max-width: 860px;
-      line-height: 1.4;
-    }
+    .stack { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 420px; }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(260px, 1fr));
-      gap: 12px;
-      max-width: 860px;
-    }
+    .actions { margin-top: 14px; max-width: 860px; display: flex; gap: 12px; align-items: center; }
+    button { padding: 10px 16px; font-size: 13px; border: 1px solid #999; border-radius: 6px; background: #f6f6f6; cursor: pointer; }
+    button:hover { background: #eee; }
+    .hint { font-size: 12px; color: #666; }
 
-    label {
-      display: block;
-      font-size: 12px;
-      margin-bottom: 4px;
-      color: #333;
-    }
+    .card { max-width: 860px; margin-top: 18px; border: 1px solid #ddd; border-radius: 10px; padding: 14px; background: #fafafa; }
+    .big { font-size: 16px; margin-bottom: 8px; }
+    .small { font-size: 12px; color: #555; line-height: 1.45; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
-    select,
-    input {
-      width: 100%;
-      padding: 10px;
-      font-size: 13px;
-      border: 1px solid #ccc;
-      border-radius: 6px;
-    }
-
-    .stack {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-      max-width: 420px;
-    }
-
-    .actions {
-      margin-top: 14px;
-      max-width: 860px;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    button {
-      padding: 10px 16px;
-      font-size: 13px;
-      border: 1px solid #999;
-      border-radius: 6px;
-      background: #f6f6f6;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: #eee;
-    }
-
-    .hint {
-      font-size: 12px;
-      color: #666;
-    }
-
-    .card {
-      max-width: 860px;
-      margin-top: 18px;
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      padding: 14px;
-      background: #fafafa;
-    }
-
-    .big {
-      font-size: 16px;
-      margin-bottom: 8px;
-    }
-
-    .small {
-      font-size: 12px;
-      color: #555;
-      line-height: 1.45;
-    }
-
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-                   "Liberation Mono", "Courier New", monospace;
-    }
-
-    /* Working-hours indicator */
-    .good {
-      color: #1b7a1b;
-      font-weight: 600;
-    }
-
-    .bad {
-      color: #b00020;
-      font-weight: 600;
-    }
+    .good { color: #1b7a1b; font-weight: 600; }
+    .bad { color: #b00020; font-weight: 600; }
   </style>
 </head>
 
 <body>
-
   <h1>Team Time Zone Converter</h1>
 
   <p class="sub">
     Choose your location (“From”), enter your date and time, then choose the target
     location (“To”). Click <b>Convert</b> to see the exact time in the other location.
-    Daylight saving time is handled automatically. The result also indicates whether
-    the converted time is within or outside typical team working hours.
+    Daylight saving time is handled automatically. The result also shows if the converted time
+    is within or outside typical team working hours.
   </p>
 
   <div class="grid">
-
     <div>
       <label for="fromLoc">From (your location)</label>
       <select id="fromLoc"></select>
@@ -156,21 +65,15 @@
     </div>
 
     <div></div>
-
   </div>
 
   <div class="actions">
     <button id="convertBtn">Convert</button>
-    <span class="hint">
-      Enter the time you plan to set in your own location.
-    </span>
+    <span class="hint">Enter the time you plan to set in your own location.</span>
   </div>
 
   <div class="card">
-    <div class="big" id="resultMain">
-      Select locations, date, and time — then click Convert.
-    </div>
-
+    <div class="big" id="resultMain">Select locations, date, and time — then click Convert.</div>
     <div class="small" id="resultSub"></div>
   </div>
 
@@ -197,31 +100,28 @@
   ];
 
   /* ==========================================================
-     WORKING HOURS CUTOFFS (local time)
-     Rule: if converted hour is >= cutoff, mark as outside.
+     WORKING HOURS WINDOWS (local time)
+     - "Within" means startHour <= hour < endHour
+     - Everything else is "Outside"
      ========================================================== */
 
-  const WORK_CUTOFF = {
-    // Philippines: outside from 11 PM onward
-    "Asia/Manila": 23,
+  const DEFAULT_WORK_WINDOW = { start: 9, end: 17 }; // 9:00–17:00
 
-    // Canada (all listed): outside from 5 PM onward
-    "America/Toronto": 17,
-    "America/Halifax": 17,
-    "America/Vancouver": 17,
-    "America/Edmonton": 17,
+  const WORK_WINDOWS = {
+    // Philippines: ends at 11 PM (23:00). Midnight is outside.
+    "Asia/Manila": { start: 9, end: 23 },
 
-    // Kenya: outside from 5 PM onward
-    "Africa/Nairobi": 17,
+    // Canada (all listed): 9 AM–5 PM
+    "America/Toronto": { start: 9, end: 17 },
+    "America/Halifax": { start: 9, end: 17 },
+    "America/Vancouver": { start: 9, end: 17 },
+    "America/Edmonton": { start: 9, end: 17 },
 
-    // India: outside from 5 PM onward
-    "Asia/Kolkata": 17,
-
-    // Mexico: outside from 5 PM onward
-    "America/Mexico_City": 17,
-
-    // Brazil: outside from 5 PM onward
-    "America/Sao_Paulo": 17
+    // Kenya, India, Mexico, Brazil: 9 AM–5 PM
+    "Africa/Nairobi": { start: 9, end: 17 },
+    "Asia/Kolkata": { start: 9, end: 17 },
+    "America/Mexico_City": { start: 9, end: 17 },
+    "America/Sao_Paulo": { start: 9, end: 17 }
   };
 
   /* ==========================================================
@@ -254,14 +154,13 @@
       toLoc.appendChild(o2);
     }
 
-    // Default: Ontario → Philippines (adjust if you want)
+    // Default: Ontario → Philippines
     fromLoc.value = "America/Toronto";
     toLoc.value   = "Asia/Manila";
   }
 
   function getLabel(tz) {
-    const item = LOCATIONS.find(x => x.tz === tz);
-    return item ? item.label : tz;
+    return LOCATIONS.find(x => x.tz === tz)?.label || tz;
   }
 
   /* ==========================================================
@@ -282,12 +181,10 @@
     }).format(dateObj);
   }
 
-  // Interpret user-entered date/time in the "From" timezone.
-  // This avoids relying on the browser's local timezone.
+  // Interpret user-entered date/time in the "From" timezone (DST-safe)
   function buildInstant(fromTZ, y, m, d, h, min) {
     let dt = new Date(Date.UTC(y, m - 1, d, h, min, 0));
 
-    // Adjust until the clock in fromTZ matches the user's intended local time
     for (let i = 0; i < 6; i++) {
       const parts = new Intl.DateTimeFormat("en-CA", {
         timeZone: fromTZ,
@@ -319,7 +216,7 @@
     return dt;
   }
 
-  // Get the hour (0-23) in a given timezone for the instant
+  // Get hour in a given TZ for this instant (0–23)
   function getHourInTZ(dateObj, tz) {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: tz,
@@ -328,6 +225,11 @@
     }).formatToParts(dateObj);
 
     return Number(parts.find(p => p.type === "hour")?.value);
+  }
+
+  function isWithinWorkingHours(tz, hour) {
+    const window = WORK_WINDOWS[tz] || DEFAULT_WORK_WINDOW;
+    return hour >= window.start && hour < window.end;
   }
 
   /* ==========================================================
@@ -356,12 +258,10 @@
     const toLabel   = getLabel(toTZ);
 
     const targetHour = getHourInTZ(instant, toTZ);
-    const cutoff = WORK_CUTOFF[toTZ] ?? 17;
+    const within = isWithinWorkingHours(toTZ, targetHour);
 
-    const isOutside = targetHour >= cutoff;
-
-    const statusClass = isOutside ? "bad" : "good";
-    const statusText  = isOutside ? "Outside working hours" : "Within working hours";
+    const statusClass = within ? "good" : "bad";
+    const statusText  = within ? "Within working hours" : "Outside working hours";
 
     resultMain.innerHTML =
       `In ${toLabel}, it’s <span class="${statusClass}">${toText}</span>.`;
@@ -402,7 +302,6 @@
 
   convertBtn.addEventListener("click", convert);
 
-  // If From changes, refresh defaults so date/time matches the selected zone
   fromLoc.addEventListener("change", () => {
     setNowInFromTZ();
   });
