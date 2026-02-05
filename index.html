@@ -106,6 +106,17 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
                    "Liberation Mono", "Courier New", monospace;
     }
+
+    /* Working-hours indicator */
+    .good {
+      color: #1b7a1b;
+      font-weight: 600;
+    }
+
+    .bad {
+      color: #b00020;
+      font-weight: 600;
+    }
   </style>
 </head>
 
@@ -116,7 +127,8 @@
   <p class="sub">
     Choose your location (“From”), enter your date and time, then choose the target
     location (“To”). Click <b>Convert</b> to see the exact time in the other location.
-    Daylight saving time is handled automatically.
+    Daylight saving time is handled automatically. The result also indicates whether
+    the converted time is within or outside typical team working hours.
   </p>
 
   <div class="grid">
@@ -163,55 +175,54 @@
   </div>
 
 <script>
-
   /* ==========================================================
-     TEAM LOCATIONS (DST handled automatically)
+     TEAM LOCATIONS (DST handled automatically via IANA TZ rules)
      ========================================================== */
 
   const LOCATIONS = [
-
     // Canada
-    {
-      label: "Canada — Ontario (Toronto, Eastern Time)",
-      tz: "America/Toronto"
-    },
-    {
-      label: "Canada — Nova Scotia (Halifax, Atlantic Time)",
-      tz: "America/Halifax"
-    },
-    {
-      label: "Canada — British Columbia (Vancouver, Pacific Time)",
-      tz: "America/Vancouver"
-    },
-    {
-      label: "Canada — Alberta (Edmonton, Mountain Time)",
-      tz: "America/Edmonton"
-    },
+    { label: "Canada — Ontario (Toronto, Eastern Time)", tz: "America/Toronto" },
+    { label: "Canada — Nova Scotia (Halifax, Atlantic Time)", tz: "America/Halifax" },
+    { label: "Canada — British Columbia (Vancouver, Pacific Time)", tz: "America/Vancouver" },
+    { label: "Canada — Alberta (Edmonton, Mountain Time)", tz: "America/Edmonton" },
 
     // Mexico
-    {
-      label: "Mexico — Central Time (Mexico City)",
-      tz: "America/Mexico_City"
-    },
+    { label: "Mexico — Central Time (Mexico City)", tz: "America/Mexico_City" },
 
     // Other countries
-    {
-      label: "Brazil — São Paulo",
-      tz: "America/Sao_Paulo"
-    },
-    {
-      label: "Kenya — Nairobi",
-      tz: "Africa/Nairobi"
-    },
-    {
-      label: "Philippines — Manila",
-      tz: "Asia/Manila"
-    },
-    {
-      label: "India — New Delhi (IST)",
-      tz: "Asia/Kolkata"
-    }
+    { label: "Brazil — São Paulo", tz: "America/Sao_Paulo" },
+    { label: "Kenya — Nairobi", tz: "Africa/Nairobi" },
+    { label: "Philippines — Manila", tz: "Asia/Manila" },
+    { label: "India — New Delhi (IST)", tz: "Asia/Kolkata" }
   ];
+
+  /* ==========================================================
+     WORKING HOURS CUTOFFS (local time)
+     Rule: if converted hour is >= cutoff, mark as outside.
+     ========================================================== */
+
+  const WORK_CUTOFF = {
+    // Philippines: outside from 11 PM onward
+    "Asia/Manila": 23,
+
+    // Canada (all listed): outside from 5 PM onward
+    "America/Toronto": 17,
+    "America/Halifax": 17,
+    "America/Vancouver": 17,
+    "America/Edmonton": 17,
+
+    // Kenya: outside from 5 PM onward
+    "Africa/Nairobi": 17,
+
+    // India: outside from 5 PM onward
+    "Asia/Kolkata": 17,
+
+    // Mexico: outside from 5 PM onward
+    "America/Mexico_City": 17,
+
+    // Brazil: outside from 5 PM onward
+    "America/Sao_Paulo": 17
+  };
 
   /* ==========================================================
      ELEMENTS
@@ -231,9 +242,7 @@
      ========================================================== */
 
   function initSelects() {
-
     for (const loc of LOCATIONS) {
-
       const o1 = document.createElement("option");
       o1.value = loc.tz;
       o1.textContent = loc.label;
@@ -245,7 +254,7 @@
       toLoc.appendChild(o2);
     }
 
-    // Default: Ontario → Philippines
+    // Default: Ontario → Philippines (adjust if you want)
     fromLoc.value = "America/Toronto";
     toLoc.value   = "Asia/Manila";
   }
@@ -260,7 +269,6 @@
      ========================================================== */
 
   function formatInTZ(dateObj, tz) {
-
     return new Intl.DateTimeFormat("en-US", {
       timeZone: tz,
       weekday: "short",
@@ -274,12 +282,13 @@
     }).format(dateObj);
   }
 
+  // Interpret user-entered date/time in the "From" timezone.
+  // This avoids relying on the browser's local timezone.
   function buildInstant(fromTZ, y, m, d, h, min) {
-
     let dt = new Date(Date.UTC(y, m - 1, d, h, min, 0));
 
+    // Adjust until the clock in fromTZ matches the user's intended local time
     for (let i = 0; i < 6; i++) {
-
       const parts = new Intl.DateTimeFormat("en-CA", {
         timeZone: fromTZ,
         year: "numeric",
@@ -302,7 +311,6 @@
       const current = Date.UTC(cy, cm - 1, cd, ch, cmin, 0);
 
       const diff = target - current;
-
       if (diff === 0) return dt;
 
       dt = new Date(dt.getTime() + diff);
@@ -311,12 +319,22 @@
     return dt;
   }
 
+  // Get the hour (0-23) in a given timezone for the instant
+  function getHourInTZ(dateObj, tz) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      hour: "2-digit",
+      hour12: false
+    }).formatToParts(dateObj);
+
+    return Number(parts.find(p => p.type === "hour")?.value);
+  }
+
   /* ==========================================================
-     MAIN CONVERSION
+     MAIN CONVERSION + WORKING HOURS CHECK
      ========================================================== */
 
   function convert() {
-
     if (!dateEl.value || !timeEl.value) {
       resultMain.textContent = "Please select a date and time first.";
       resultSub.textContent  = "";
@@ -334,13 +352,22 @@
     const fromText = formatInTZ(instant, fromTZ);
     const toText   = formatInTZ(instant, toTZ);
 
-    const fromLabel= getLabel(fromTZ);
-    const toLabel  = getLabel(toTZ);
+    const fromLabel = getLabel(fromTZ);
+    const toLabel   = getLabel(toTZ);
 
-    resultMain.textContent =
-      `In ${toLabel}, it’s ${toText}.`;
+    const targetHour = getHourInTZ(instant, toTZ);
+    const cutoff = WORK_CUTOFF[toTZ] ?? 17;
+
+    const isOutside = targetHour >= cutoff;
+
+    const statusClass = isOutside ? "bad" : "good";
+    const statusText  = isOutside ? "Outside working hours" : "Within working hours";
+
+    resultMain.innerHTML =
+      `In ${toLabel}, it’s <span class="${statusClass}">${toText}</span>.`;
 
     resultSub.innerHTML =
+      `Status: <span class="${statusClass}">${statusText}</span><br>` +
       `You entered: <span class="mono">${fromText}</span> (${fromLabel})<br>` +
       `Converted to: <span class="mono">${toText}</span> (${toLabel})`;
   }
@@ -350,7 +377,6 @@
      ========================================================== */
 
   function setNowInFromTZ() {
-
     const tz  = fromLoc.value;
     const now = new Date();
 
@@ -376,6 +402,7 @@
 
   convertBtn.addEventListener("click", convert);
 
+  // If From changes, refresh defaults so date/time matches the selected zone
   fromLoc.addEventListener("change", () => {
     setNowInFromTZ();
   });
@@ -386,7 +413,6 @@
 
   initSelects();
   setNowInFromTZ();
-
 </script>
 </body>
 </html>
